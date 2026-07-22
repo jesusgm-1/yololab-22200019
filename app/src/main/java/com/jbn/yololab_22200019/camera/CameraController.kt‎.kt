@@ -20,6 +20,8 @@ class CameraController(
     private val lifecycleOwner: LifecycleOwner,
     private val previewView: PreviewView,
     private val onFrame: (ImageProxy) -> Unit
+    private val onFrame: (ImageProxy) -> Unit,
+    private val onAnalysisClosed: () -> Unit = {}
 ) : AutoCloseable {
     private val analysisExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private var preview: Preview? = null
@@ -44,47 +46,35 @@ class CameraController(
         stopped = false
         val providerFuture = ProcessCameraProvider.getInstance(context)
         providerFuture.addListener({
-            if (stopped) return@addListener
-            try {
-                val provider = providerFuture.get()
-                val initialRotation = previewView.display?.rotation ?: Surface.ROTATION_0
-                val preview = Preview.Builder()
-                    .setTargetRotation(initialRotation)
-                    .build()
-                    .also { it.setSurfaceProvider(previewView.surfaceProvider) }
-                val analysis = ImageAnalysis.Builder()
-                    .setTargetRotation(initialRotation)
-                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                    .build()
-                    .also { useCase ->
-                        useCase.setAnalyzer(analysisExecutor) { frame -> onFrame(frame) }
-                    }
-                this.preview = preview
-                imageAnalysis = analysis
-                provider.unbindAll()
-                provider.bindToLifecycle(
+            useCase.setAnalyzer(analysisExecutor) { frame -> onFrame(frame) }
+        }
+            this.preview = preview
+                    imageAnalysis = analysis
+                    provider.unbindAll()
+                    provider.bindToLifecycle(
                     lifecycleOwner,
-                    CameraSelector.DEFAULT_BACK_CAMERA,
-                    preview,
-                    analysis
-                )
-                if (orientationListener.canDetectOrientation()) orientationListener.enable()
-            } catch (error: Exception) {
-                Log.e(TAG, "No se pudo iniciar CameraX", error)
-            }
-        }, ContextCompat.getMainExecutor(context))
+            CameraSelector.DEFAULT_BACK_CAMERA,
+            preview,
+            analysis
+        )
+        if (orientationListener.canDetectOrientation()) orientationListener.enable()
+    } catch (error: Exception) {
+        Log.e(TAG, "No se pudo iniciar CameraX", error)
     }
+}, ContextCompat.getMainExecutor(context))
+}
 
-    override fun close() {
-        stopped = true
-        orientationListener.disable()
-        imageAnalysis?.clearAnalyzer()
-        preview = null
-        imageAnalysis = null
-        analysisExecutor.shutdown()
-    }
+override fun close() {
+    stopped = true
+    orientationListener.disable()
+    imageAnalysis?.clearAnalyzer()
+    preview = null
+    imageAnalysis = null
+    analysisExecutor.execute(onAnalysisClosed)
+    analysisExecutor.shutdown()
+}
 
-    private companion object {
-        const val TAG = "CameraController"
-    }
+private companion object {
+    const val TAG = "CameraController"
+}
 }
