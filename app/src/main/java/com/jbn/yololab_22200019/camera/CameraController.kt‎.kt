@@ -20,21 +20,18 @@ class CameraController(
     private val lifecycleOwner: LifecycleOwner,
     private val previewView: PreviewView,
     private val onFrame: (ImageProxy) -> Unit
-    private val onFrame: (ImageProxy) -> Unit,
-    private val onAnalysisClosed: () -> Unit = {}
-) : AutoCloseable {
+) {
     private val analysisExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private var preview: Preview? = null
     private var imageAnalysis: ImageAnalysis? = null
-    private var stopped = false
 
     private val orientationListener = object : OrientationEventListener(context) {
-        override fun onOrientationChanged(orientation: Int) {
-            if (orientation == ORIENTATION_UNKNOWN) return
+        override fun onOrientationChanged(orientationDegrees: Int) {
+            if (orientationDegrees == ORIENTATION_UNKNOWN) return
             val rotation = when {
-                orientation >= 315 || orientation < 45 -> Surface.ROTATION_0
-                orientation < 135 -> Surface.ROTATION_270
-                orientation < 225 -> Surface.ROTATION_180
+                orientationDegrees >= 315 || orientationDegrees < 45 -> Surface.ROTATION_0
+                orientationDegrees < 135 -> Surface.ROTATION_270
+                orientationDegrees < 225 -> Surface.ROTATION_180
                 else -> Surface.ROTATION_90
             }
             preview?.targetRotation = rotation
@@ -43,38 +40,38 @@ class CameraController(
     }
 
     fun start() {
-        stopped = false
-        val providerFuture = ProcessCameraProvider.getInstance(context)
-        providerFuture.addListener({
-            useCase.setAnalyzer(analysisExecutor) { frame -> onFrame(frame) }
-        }
+        val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
+        cameraProviderFuture.addListener({
+            val cameraProvider = cameraProviderFuture.get()
+
+            val preview = Preview.Builder().build().also {
+                it.setSurfaceProvider(previewView.surfaceProvider)
+            }
             this.preview = preview
-                    imageAnalysis = analysis
-                    provider.unbindAll()
-                    provider.bindToLifecycle(
-                    lifecycleOwner,
-            CameraSelector.DEFAULT_BACK_CAMERA,
-            preview,
-            analysis
-        )
-        if (orientationListener.canDetectOrientation()) orientationListener.enable()
-    } catch (error: Exception) {
-        Log.e(TAG, "No se pudo iniciar CameraX", error)
+
+            val imageAnalysis = ImageAnalysis.Builder()
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .build()
+                .also {
+                    it.setAnalyzer(analysisExecutor) { imageProxy ->
+                        Log.d("CameraController", "Received frame: ${imageProxy.width}x${imageProxy.height}")
+                        onFrame(imageProxy)
+                    }
+                }
+            this.imageAnalysis = imageAnalysis
+
+            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+            cameraProvider.unbindAll()
+            cameraProvider.bindToLifecycle(
+                lifecycleOwner, cameraSelector, preview, imageAnalysis
+            )
+
+            orientationListener.enable()
+        }, ContextCompat.getMainExecutor(context))
     }
-}, ContextCompat.getMainExecutor(context))
-}
 
-override fun close() {
-    stopped = true
-    orientationListener.disable()
-    imageAnalysis?.clearAnalyzer()
-    preview = null
-    imageAnalysis = null
-    analysisExecutor.execute(onAnalysisClosed)
-    analysisExecutor.shutdown()
-}
-
-private companion object {
-    const val TAG = "CameraController"
-}
+    fun shutdown() {
+        orientationListener.disable()
+        analysisExecutor.shutdown()
+    }
 }

@@ -1,10 +1,7 @@
+package com.jbn.yololab_22200019.ui
 
-
-package com.jbn.yololab_22200019.ui.theme
-
-import android.graphics.Bitmap
-import android.graphics.Paint
 import android.content.Context
+import android.graphics.Paint
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -22,130 +19,176 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import com.jbn.yololab_22200019.camera.CameraController
+import com.jbn.yololab_22200019.detector.BoundingBox
+import com.jbn.yololab_22200019.detector.ImageUtils
 import com.jbn.yololab_22200019.detector.ObjectDetectorHelper
-import java.util.concurrent.atomic.AtomicReference
-import kotlin.math.max
 import kotlin.math.atan2
+import kotlin.math.max
 import kotlin.math.roundToInt
 
 @Composable
-@@ -53,27 +62,46 @@
-var detections by remember { mutableStateOf<List<BoundingBox>>(emptyList()) }
-var frameWidth by remember { mutableIntStateOf(0) }
-var frameHeight by remember { mutableIntStateOf(0) }
-var tiltAngle by remember { mutableStateOf(0f) }
+fun CameraScreen() {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val detectorHelper = remember { ObjectDetectorHelper(context = context.applicationContext) }
 
-DisposableEffect(context) {
-    val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
-    val accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
-    val listener = object : SensorEventListener {
-        override fun onSensorChanged(event: SensorEvent) {
-            val x = event.values[0]
-            val y = event.values[1]
-            tiltAngle = Math.toDegrees(atan2(-x.toDouble(), y.toDouble())).toFloat()
-        }
+    var detections by remember { mutableStateOf<List<BoundingBox>>(emptyList()) }
+    var frameWidth by remember { mutableStateOf(0) }
+    var frameHeight by remember { mutableStateOf(0) }
+    var personCount by remember { mutableStateOf(0) }
+    var cameraController by remember { mutableStateOf<CameraController?>(null) }
+    var tiltAngle by remember { mutableStateOf(0f) }
 
-        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
-    }
-    accelerometer?.let {
-        sensorManager.registerListener(listener, it, SensorManager.SENSOR_DELAY_UI)
-    }
-    onDispose { sensorManager.unregisterListener(listener) }
-}
-
-Box(modifier = Modifier.fillMaxSize()) {
-    AndroidView(
-        modifier = Modifier.fillMaxSize(),
-        factory = { viewContext ->
-            val previewView = PreviewView(viewContext).apply {
-                scaleType = PreviewView.ScaleType.FILL_CENTER
+    DisposableEffect(Unit) {
+        val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        val accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        val listener = object : SensorEventListener {
+            override fun onSensorChanged(event: SensorEvent) {
+                val x = event.values[0]
+                val y = event.values[1]
+                tiltAngle = Math.toDegrees(atan2(-x.toDouble(), y.toDouble())).toFloat()
             }
-            val controller = CameraController(
-                context = viewContext,
-                lifecycleOwner = lifecycleOwner,
-                previewView = previewView,
-                onFrame = { frame ->
-                    var bitmap: Bitmap? = null
-                    try {
-                        bitmap = ImageUtils.imageProxyToBitmap(frame)
-                        val detector = detectorRef.get() ?: ObjectDetectorHelper(
-                            context.applicationContext
-                        ).also(detectorRef::set)
-                        val results = detector.detect(bitmap)
-                        val width = bitmap.width
-                        val height = bitmap.height
-                        mainExecutor.execute {
-                            detections = results
-                            @@ -116,27 +144,64 @@
-                            topLeft = Offset(left, top),
-                            size = Size(right - left, bottom - top),
-                            style = Stroke(width = 4f)
-                            )
-                            drawContext.canvas.nativeCanvas.drawText(
-                                "${box.label} ${(box.score * 100).roundToInt()}%",
-                                left + 8f,
-                                (top - 12f).coerceAtLeast(labelPaint.textSize),
-                                labelPaint
-                            )
-                        }
-                    }
-
-                    Surface(
-                        modifier = Modifier.align(Alignment.TopStart).padding(16.dp),
-                        color = Color.Black.copy(alpha = 0.55f)
-                    ) {
-                        Text(
-                            text = "Personas detectadas: ${detections.size}",
-                            color = Color.White,
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.padding(8.dp)
-                        )
-                    }
-
-                    CompassOverlay(
-                        angleDegrees = tiltAngle,
-                        modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)
-                    )
-                }
+            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
         }
+        accelerometer?.let { sensorManager.registerListener(listener, it, SensorManager.SENSOR_DELAY_UI) }
+        onDispose { sensorManager.unregisterListener(listener) }
+    }
 
-        @Composable
-        private fun CompassOverlay(angleDegrees: Float, modifier: Modifier = Modifier) {
-            Box(modifier = modifier, contentAlignment = Alignment.Center) {
-                Canvas(modifier = Modifier.size(72.dp)) {
-                    val radius = size.minDimension / 2f
-                    drawCircle(color = Color.Black.copy(alpha = 0.45f), radius = radius)
-                    drawCircle(color = Color.White, radius = radius, style = Stroke(width = 3f))
-                    rotate(angleDegrees) {
-                        val center = Offset(size.width / 2f, size.height / 2f)
-                        val needleLength = radius - 8f
-                        drawLine(
-                            color = Color.Red,
-                            start = center,
-                            end = Offset(center.x, center.y - needleLength),
-                            strokeWidth = 5f
-                        )
-                        drawLine(
-                            color = Color.White,
-                            start = center,
-                            end = Offset(center.x, center.y + needleLength),
-                            strokeWidth = 5f
-                        )
+    Box(modifier = Modifier.fillMaxSize()) {
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { ctx: Context ->
+                val previewView = PreviewView(ctx)
+                val controller = CameraController(
+                    context = ctx,
+                    lifecycleOwner = lifecycleOwner,
+                    previewView = previewView
+                ) { imageProxy ->
+                    try {
+                        val bitmap = ImageUtils.imageProxyToBitmap(imageProxy)
+                        val results = detectorHelper.detect(bitmap)
+                        detections = results
+                        frameWidth = bitmap.width
+                        frameHeight = bitmap.height
+                        personCount = results.size
+                        if (results.isNotEmpty()) {
+                            results.forEach {
+                                Log.d("CameraScreen", "Detected ${it.label} score: ${it.score} at [${it.x1}, ${it.y1}, ${it.x2}, ${it.y2}]")
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e("CameraScreen", "Error in frame analysis: ${e.message}")
+                    } finally {
+                        imageProxy.close()
                     }
                 }
-                Text(
-                    text = "${angleDegrees.roundToInt()}°",
-                    color = Color.White,
-                    style = MaterialTheme.typography.labelSmall
+                controller.start()
+                cameraController = controller
+                previewView
+            },
+            onRelease = {
+                cameraController?.shutdown()
+                cameraController = null
+            }
+        )
+
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            if (frameWidth == 0 || frameHeight == 0) return@Canvas
+            val scale = max(size.width / frameWidth, size.height / frameHeight)
+            val offsetX = (frameWidth * scale - size.width) / 2f
+            val offsetY = (frameHeight * scale - size.height) / 2f
+
+            detections.forEach { box ->
+                val left = box.x1 * scale - offsetX
+                val top = box.y1 * scale - offsetY
+                val right = box.x2 * scale - offsetX
+                val bottom = box.y2 * scale - offsetY
+
+                drawRect(
+                    color = Color.Green,
+                    topLeft = Offset(left, top),
+                    size = Size(right - left, bottom - top),
+                    style = Stroke(width = 4f)
+                )
+
+                val label = "${box.label} ${(box.score * 100).toInt()}%"
+                drawContext.canvas.nativeCanvas.drawText(
+                    label,
+                    left + 8f,
+                    (top - 12f).coerceAtLeast(20f),
+                    Paint().apply {
+                        color = android.graphics.Color.WHITE
+                        textSize = 36f
+                        isAntiAlias = true
+                    }
                 )
             }
         }
+
+        Surface(
+            modifier = Modifier.align(Alignment.TopStart).padding(16.dp),
+            color = Color.Black.copy(alpha = 0.5f)
+        ) {
+            Text(
+                text = "Personas detectadas: $personCount",
+                color = Color.White,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(8.dp)
+            )
+        }
+
+        Box(
+            modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)
+        ) {
+            CompassOverlay(angleDegrees = tiltAngle)
+        }
+    }
+}
+
+@Composable
+private fun CompassOverlay(angleDegrees: Float, modifier: Modifier = Modifier) {
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        Canvas(modifier = Modifier.size(72.dp)) {
+            drawCircle(color = Color.Black.copy(alpha = 0.4f), radius = size.minDimension / 2f)
+            drawCircle(color = Color.White, radius = size.minDimension / 2f, style = Stroke(width = 3f))
+            rotate(degrees = angleDegrees) {
+                val centerX = size.width / 2f
+                val centerY = size.height / 2f
+                val needleLength = size.minDimension / 2f - 8f
+                drawLine(
+                    color = Color.Red,
+                    start = Offset(centerX, centerY),
+                    end = Offset(centerX, centerY - needleLength),
+                    strokeWidth = 5f
+                )
+                drawLine(
+                    color = Color.White,
+                    start = Offset(centerX, centerY),
+                    end = Offset(centerX, centerY + needleLength),
+                    strokeWidth = 5f
+                )
+            }
+        }
+        Text(
+            text = "${angleDegrees.roundToInt()}°",
+            color = Color.White,
+            style = MaterialTheme.typography.labelSmall
+        )
+    }
+}
