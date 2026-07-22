@@ -24,4 +24,3 @@ dependencyResolutionManagement {
 
 rootProject.name = "yololab_22200019"
 include(":app")
- 
