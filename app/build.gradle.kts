@@ -5,16 +5,12 @@ plugins {
 
 android {
     namespace = "com.jbn.yololab_22200019"
-    compileSdk {
-        version = release(37) {
-            minorApiLevel = 1
-        }
-    }
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.jbn.yololab_22200019"
         minSdk = 30
-        targetSdk = 36
+        targetSdk = 35
         versionCode = 1
         versionName = "1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -62,9 +58,11 @@ dependencies {
     implementation(libs.androidx.camera.compose)
 
     // --- LiteRT ---
-    implementation(libs.litert)
     implementation(libs.litert.gpu)
-    implementation(libs.litert.support)
+    implementation(libs.litert.support) {
+        // Exclude transitive support-api to avoid namespace conflict 'org.tensorflow.lite.support'
+        exclude(group = "com.google.ai.edge.litert", module = "litert-support-api")
+    }
 
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
